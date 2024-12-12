@@ -1,12 +1,9 @@
-import { Schema, model, type Document } from 'mongoose';
-import bcrypt from 'bcrypt';
-
-// import schema from Book.js
-import bookSchema from './Book.js';
-import type { BookDocument } from './Book.js';
+import { Schema, model, Document, Types } from 'mongoose';
+import bcryptjs from 'bcryptjs';
+import bookSchema, { type BookDocument } from './Book.js';
 
 export interface UserDocument extends Document {
-  id: string;
+  _id: Types.ObjectId;
   username: string;
   email: string;
   password: string;
@@ -21,45 +18,59 @@ const userSchema = new Schema<UserDocument>(
       type: String,
       required: true,
       unique: true,
+      trim: true,
     },
     email: {
       type: String,
       required: true,
       unique: true,
       match: [/.+@.+\..+/, 'Must use a valid email address'],
+      trim: true,
     },
     password: {
       type: String,
       required: true,
+      minlength: [6, 'Password must be at least 6 characters long'],
     },
-    // set savedBooks to be an array of data that adheres to the bookSchema
     savedBooks: [bookSchema],
   },
-  // set this to use virtual below
   {
     toJSON: {
       virtuals: true,
+      transform: (_doc, ret) => {
+        delete ret.password;
+        return ret;
+      },
     },
   }
 );
 
-// hash user password
-userSchema.pre('save', async function (next) {
+// Add pre-save middleware for password hashing
+userSchema.pre<UserDocument>('save', async function(next) {
   if (this.isNew || this.isModified('password')) {
-    const saltRounds = 10;
-    this.password = await bcrypt.hash(this.password, saltRounds);
+    try {
+      const saltRounds = 10;
+      this.password = await bcryptjs.hash(this.password, saltRounds);
+    } catch (error) {
+      console.error('Error hashing password:', error);
+      throw error;
+    }
   }
-
   next();
 });
 
-// custom method to compare and validate password for logging in
-userSchema.methods.isCorrectPassword = async function (password: string) {
-  return await bcrypt.compare(password, this.password);
+// Method to compare passwords
+userSchema.methods.isCorrectPassword = async function(this: UserDocument, password: string): Promise<boolean> {
+  try {
+    return await bcryptjs.compare(password, this.password);
+  } catch (error) {
+    console.error('Error comparing passwords:', error);
+    throw error;
+  }
 };
 
-// when we query a user, we'll also get another field called `bookCount` with the number of saved books we have
-userSchema.virtual('bookCount').get(function () {
+// Virtual for book count
+userSchema.virtual('bookCount').get(function(this: UserDocument): number {
   return this.savedBooks.length;
 });
 
